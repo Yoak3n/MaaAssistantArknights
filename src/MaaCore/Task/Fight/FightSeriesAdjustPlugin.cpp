@@ -1,49 +1,38 @@
-#include "FightTimesTaskPlugin.h"
-
-#include <ranges>
+#include "FightSeriesAdjustPlugin.h"
 
 #include "Controller/Controller.h"
 #include "Task/ProcessTask.h"
-#include "Vision/Matcher.h"
+#include "Utils/Logger.hpp"
 #include "Vision/MultiMatcher.h"
 
-bool asst::FightTimesTaskPlugin::verify(AsstMsg msg, const json::value& details) const
+bool asst::FightSeriesAdjustPlugin::verify(AsstMsg msg, const json::value& details) const
 {
-    if (msg != AsstMsg::SubTaskStart || details.get("subtask", std::string()) != "ProcessTask") {
+    if (msg != AsstMsg::SubTaskCompleted || details.get("subtask", std::string()) != "ProcessTask") {
         return false;
     }
+    bool result = details.get("details", "task", "").ends_with("CloseStonePage");
 
-    return !inited && details.get("details", "task", "").ends_with("StartButton1");
+    return result;
 }
 
-bool asst::FightTimesTaskPlugin::_run()
+bool asst::FightSeriesAdjustPlugin::_run()
 {
-    const static std::string FightSeriesOpenTask = "FightSeries-Indicator";
-    const static std::string FightSeriesValidTask = "FightSeries-Icon";
+    LogTraceFunction;
 
-    auto img = ctrler()->get_image();
-    auto is_valid_task = ProcessTask(*this, { FightSeriesOpenTask, FightSeriesValidTask });
-    is_valid_task.set_reusable_image(img).set_retry_times(0);
+    auto task = ProcessTask(*this, { "FightSeries-Open" });
+    task.run();
 
-    if (!is_valid_task.run()) { // 认为是外服，无法使用连续战斗
-        inited = true;
-        return true;
+    int exceeded_num = get_exceeded_num();
+    if (exceeded_num < 7 && exceeded_num > 1) {
+        ProcessTask(*this, { "FightSeries-List-" + std::to_string(exceeded_num - 1) }).run();
     }
-
-    if (is_valid_task.get_last_task_name() == FightSeriesValidTask) { // 连续战斗次数选择列表未打开
-        auto task = ProcessTask(*this, { "FightSeries-Open" });
-        task.set_reusable_image(img);
-        if (!task.run()) {
-            return false;
-        }
+    else {
     }
-    ProcessTask(*this, { "FightSeries-List-" + std::to_string(m_series) }).run();
-
-    inited = true;
+    ProcessTask(*this, { "StartButton1" }).set_retry_times(3).run();
     return true;
 }
 
-int asst::FightTimesTaskPlugin::get_exceeded_num()
+int asst::FightSeriesAdjustPlugin::get_exceeded_num()
 {
     auto img = ctrler()->get_image();
     if (img.empty()) {
@@ -53,12 +42,12 @@ int asst::FightTimesTaskPlugin::get_exceeded_num()
     multi_matcher.set_task_info("FightSeries-List-Exceeded");
     if (!multi_matcher.analyze()) {
         Log.error(__FUNCTION__, "fight seriers exceeded analyze failed");
-        return 0;
+        return 7;
     }
     auto match_result = multi_matcher.get_result();
     if (match_result.empty()) {
         LogInfo << __FUNCTION__ << "No matches found for FightSeries-List-Exceeded.";
-        return 0; // 没有匹配结果，返回 0
+        return 7; // 没有匹配结果，返回 7
     }
     sort_by_vertical_(match_result);
     int exceeded_y_pos = match_result[0].rect.y;

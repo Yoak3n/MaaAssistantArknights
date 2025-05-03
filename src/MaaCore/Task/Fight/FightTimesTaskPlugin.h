@@ -13,6 +13,8 @@ public:
 
     void set_series(int series) { m_series = series; }
 
+    int get_exceeded_num();
+
 protected:
     virtual bool _run() override;
 
